@@ -1,0 +1,664 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TikTok Live Recorder</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;600;700&family=Bebas+Neue&display=swap" rel="stylesheet">
+
+<!-- FFmpeg.wasm -->
+<script src="https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.6/dist/umd/ffmpeg.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@ffmpeg/util@0.12.1/dist/umd/index.js"></script>
+
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0d0d0d;--card:#1a1a1a;--border:#2a2a2a;
+  --red:#fe2c55;--cyan:#25f4ee;--text:#f0f0f0;
+  --muted:#555;--success:#00c875;--warn:#ffb800;
+  --tab-bg:#111;
+  --mono:'JetBrains Mono',monospace;
+  --display:'Bebas Neue',sans-serif;
+}
+html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--mono);overflow:hidden}
+::-webkit-scrollbar{width:5px;height:5px}
+::-webkit-scrollbar-track{background:var(--bg)}
+::-webkit-scrollbar-thumb{background:#333;border-radius:3px}
+
+.app{display:flex;flex-direction:column;height:100vh;max-width:880px;margin:0 auto;padding:0 1.2rem}
+
+/* HEADER */
+.hdr{display:flex;align-items:center;justify-content:space-between;padding:16px 0 12px;border-bottom:1px solid var(--border);flex-shrink:0}
+.logo{display:flex;align-items:center;gap:12px}
+.logo-dot{font-size:2rem;color:var(--red);animation:blink 2s infinite}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.3}}
+.logo h1{font-family:var(--display);font-size:1.8rem;letter-spacing:.05em;line-height:1}
+.logo p{font-size:.62rem;color:var(--muted);margin-top:2px;letter-spacing:.12em;text-transform:uppercase}
+.badge{font-size:.62rem;color:var(--cyan);border:1px solid rgba(37,244,238,.35);padding:3px 10px;letter-spacing:.18em}
+
+/* PROGRESS BAR global */
+.global-progress{height:2px;background:var(--border);flex-shrink:0;position:relative;overflow:hidden}
+.global-progress-fill{position:absolute;left:0;top:0;height:100%;width:0%;background:linear-gradient(90deg,var(--cyan),var(--red));transition:width .4s;border-radius:2px}
+
+/* TABS */
+.tab-bar{display:flex;align-items:center;gap:3px;padding:8px 0 0;flex-shrink:0;overflow-x:auto}
+.tab-bar::-webkit-scrollbar{height:2px}
+.tab{display:flex;align-items:center;gap:5px;padding:5px 12px;background:var(--tab-bg);border:1px solid var(--border);border-bottom:none;cursor:pointer;font-size:.72rem;color:var(--muted);transition:all .12s;white-space:nowrap;border-radius:4px 4px 0 0;user-select:none}
+.tab:hover{color:var(--text)}
+.tab.active{background:var(--card);color:var(--text);border-color:var(--cyan);border-bottom:1px solid var(--card)}
+.tdot{font-size:.45rem;transition:color .3s}
+.tdot.rec{color:var(--red);animation:blink .8s infinite}
+.tdot.ok{color:var(--success)}
+.tdot.idle{color:var(--muted)}
+.tclose{background:none;border:none;color:var(--muted);cursor:pointer;font-size:.8rem;padding:0 2px;line-height:1}
+.tclose:hover{color:var(--red)}
+.btn-new{padding:4px 10px;background:transparent;border:1px dashed var(--border);color:var(--cyan);cursor:pointer;font-size:.95rem;border-radius:4px;transition:all .12s;font-family:var(--mono)}
+.btn-new:hover{border-color:var(--cyan);background:#0a2e2d20}
+.tab-line{height:1px;background:var(--cyan);flex-shrink:0}
+
+/* PANELS */
+.panels{flex:1;overflow:hidden;position:relative}
+.panel{display:none;flex-direction:column;height:100%;overflow-y:auto;padding:0 0 20px;gap:0}
+.panel.active{display:flex}
+
+/* SECTION */
+.slabel{font-size:.68rem;color:var(--cyan);font-weight:700;letter-spacing:.1em;text-transform:uppercase;margin:14px 0 5px 2px}
+.fw{background:var(--border);padding:1px;border-radius:3px;transition:box-shadow .15s}
+.fw:focus-within{box-shadow:0 0 0 1px var(--cyan)}
+.fi{background:var(--card)}
+textarea.ta{width:100%;height:110px;background:transparent;color:var(--muted);border:none;outline:none;resize:none;font-family:var(--mono);font-size:.75rem;padding:10px;line-height:1.55;display:block}
+textarea.ta:focus{color:var(--text)}
+input.inp{width:100%;background:transparent;color:var(--muted);border:none;outline:none;font-family:var(--mono);font-size:.88rem;padding:8px 10px;display:block}
+input.inp:focus{color:var(--text)}
+.row{display:flex;align-items:center;gap:8px;padding:2px 8px}
+.at{font-size:1.2rem;color:var(--red);font-weight:700;flex-shrink:0}
+.ext{font-size:.85rem;color:var(--muted);flex-shrink:0}
+.hint{font-size:.68rem;color:var(--muted);margin-top:3px;padding-left:3px;min-height:15px}
+
+/* BUTTONS */
+.divider{height:1px;background:var(--border);margin:14px 0}
+.btn-row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.btn{border:none;cursor:pointer;font-family:var(--mono);font-weight:700;border-radius:3px;transition:all .15s;display:flex;align-items:center;gap:6px;white-space:nowrap}
+.btn:disabled{opacity:.35;cursor:not-allowed}
+.b-ini{background:var(--red);color:#0d0d0d;font-size:.88rem;padding:10px 18px}
+.b-ini:hover:not(:disabled){background:#cc2244}
+.b-det{background:var(--card);color:var(--text);font-size:.88rem;padding:10px 16px;border:1px solid var(--border)}
+.b-det:hover:not(:disabled){background:var(--border)}
+.b-dl{background:var(--success);color:#0d0d0d;font-size:.82rem;padding:9px 16px;display:none}
+.b-dl:hover{background:#00a060;transform:translateY(-1px)}
+.stlbl{font-size:.78rem;font-weight:700;margin-top:6px;padding-left:2px}
+
+/* STATS */
+.stats-row{display:flex;gap:16px;margin-top:8px;flex-wrap:wrap}
+.stat{display:flex;flex-direction:column;gap:2px}
+.stat-val{font-size:1rem;font-weight:700;color:var(--cyan);font-family:var(--display);letter-spacing:.05em}
+.stat-lbl{font-size:.6rem;color:var(--muted);text-transform:uppercase;letter-spacing:.1em}
+
+/* PROGRESS */
+.prog-wrap{margin-top:10px;display:none}
+.prog-bar{height:4px;background:var(--border);border-radius:2px;overflow:hidden;position:relative}
+.prog-fill{position:absolute;left:0;top:0;height:100%;width:0%;background:linear-gradient(90deg,var(--cyan),var(--red));transition:width .5s;border-radius:2px}
+.prog-label{font-size:.68rem;color:var(--muted);margin-top:4px;display:flex;justify-content:space-between}
+
+/* CONSOLE */
+.console{background:#080808;border:1px solid var(--border);flex:1;min-height:160px;max-height:260px;overflow-y:auto;padding:10px;font-size:.73rem;line-height:1.65;margin-top:4px;border-radius:2px}
+.ll{display:block}
+.li{color:#00e676}.le{color:var(--red)}.lw{color:var(--warn)}.lm{color:var(--muted)}.ls{color:var(--success)}.lc{color:var(--cyan)}
+.lts{color:#2a2a2a;margin-right:5px}
+
+/* WARNING BANNER */
+.warn-banner{background:#1a1200;border:1px solid #3a2800;padding:8px 12px;font-size:.7rem;color:var(--warn);border-radius:3px;margin-top:10px;line-height:1.6}
+</style>
+</head>
+<body>
+<div class="app">
+
+  <div class="hdr">
+    <div class="logo">
+      <span class="logo-dot">◉</span>
+      <div>
+        <h1>TikTok Live Recorder</h1>
+        <p>OSINT · FFmpeg.wasm · sin servidor · GitHub Pages</p>
+      </div>
+    </div>
+    <span class="badge">OSINT TOOL</span>
+  </div>
+
+  <div class="global-progress"><div class="global-progress-fill" id="gpf"></div></div>
+
+  <div class="tab-bar" id="tab-bar">
+    <button class="btn-new" onclick="addTab()">+</button>
+  </div>
+  <div class="tab-line"></div>
+  <div class="panels" id="panels"></div>
+
+</div>
+
+<script>
+// ══════════════════════════════════════════
+//  CONSTANTES
+// ══════════════════════════════════════════
+const COOKIE_PH = `# Pega aquí el contenido de tu cookies.txt (formato Netscape)
+# Ejemplo:
+# .tiktok.com\tTRUE\t/\tTRUE\t1806102639\tttwid\tVALOR`;
+
+// Proxies CORS públicos — se intentan en orden
+const CORS_PROXIES = [
+  url => `https://corsproxy.io/?${encodeURIComponent(url)}`,
+  url => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
+  url => `https://cors-anywhere.herokuapp.com/${url}`,
+];
+
+let tabCount = 0;
+let activeTab = null;
+const tabs = {};
+
+// ══════════════════════════════════════════
+//  FFMPEG — carga lazy por tab
+// ══════════════════════════════════════════
+async function loadFFmpeg(id) {
+  const { FFmpeg } = FFmpegWASM;
+  const { fetchFile, toBlobURL } = FFmpegUtil;
+  const ff = new FFmpeg();
+  ff.on("log", ({ message }) => log(id, message, "lm"));
+  ff.on("progress", ({ progress, time }) => {
+    const pct = Math.min(100, Math.round(progress * 100));
+    updateProgress(id, pct, `Procesando… ${pct}%`);
+  });
+  const base = "https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.6/dist/umd";
+  await ff.load({
+    coreURL:   await toBlobURL(`${base}/ffmpeg-core.js`,   "text/javascript"),
+    wasmURL:   await toBlobURL(`${base}/ffmpeg-core.wasm`, "application/wasm"),
+  });
+  tabs[id].ff = ff;
+  tabs[id].fetchFile = fetchFile;
+  return ff;
+}
+
+// ══════════════════════════════════════════
+//  TABS
+// ══════════════════════════════════════════
+function addTab() {
+  const id = tabCount++;
+  tabs[id] = { status:"idle", chunks:[], ff:null, recording:false, abortCtrl:null };
+
+  // Tab button
+  const t = document.createElement("div");
+  t.className = "tab"; t.id = `tab-${id}`;
+  t.onclick = () => selectTab(id);
+  t.innerHTML = `<span class="tdot idle" id="tdot-${id}">●</span>
+    <span id="tlbl-${id}">Tab ${id+1}</span>
+    ${id>0?`<button class="tclose" onclick="closeTab(event,${id})">✕</button>`:""}`;
+  document.getElementById("tab-bar").insertBefore(t, document.querySelector(".btn-new"));
+
+  // Panel
+  const p = document.createElement("div");
+  p.className = "panel"; p.id = `panel-${id}`;
+  p.innerHTML = `
+    <!-- COOKIES -->
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-top:14px">
+      <span class="slabel" style="margin:0">① Cookies (pega el contenido del .txt)</span>
+      <button class="btn b-det" style="font-size:.65rem;padding:3px 8px" onclick="clearCookies(${id})">✕ LIMPIAR</button>
+    </div>
+    <div class="fw" style="margin-top:5px"><div class="fi">
+      <textarea class="ta" id="ta-${id}" spellcheck="false">${COOKIE_PH}</textarea>
+    </div></div>
+    <div class="hint" id="cst-${id}"></div>
+
+    <!-- USUARIO -->
+    <div class="slabel">② Usuario de TikTok</div>
+    <div class="fw"><div class="fi">
+      <div class="row">
+        <span class="at">@</span>
+        <input class="inp" id="usr-${id}" type="text" placeholder="naialajes" oninput="updatePreviews(${id})">
+      </div>
+    </div></div>
+    <div class="hint" id="upr-${id}">https://www.tiktok.com/@… /live</div>
+
+    <!-- NOMBRE -->
+    <div class="slabel">③ Nombre del archivo de salida</div>
+    <div class="fw"><div class="fi">
+      <div class="row">
+        <input class="inp" id="nom-${id}" type="text" placeholder="lorena" oninput="updatePreviews(${id})" style="flex:1">
+        <span class="ext">.mp4</span>
+      </div>
+    </div></div>
+    <div class="hint" id="rpr-${id}"></div>
+
+    <div class="divider"></div>
+
+    <!-- BOTONES -->
+    <div class="btn-row">
+      <button class="btn b-ini" id="bi-${id}" onclick="iniciar(${id})">▶ INICIAR GRABACIÓN</button>
+      <button class="btn b-det" id="bd-${id}" onclick="detener(${id})" disabled>■ DETENER</button>
+      <button class="btn b-dl"  id="dl-${id}" onclick="descargar(${id})">⬇ DESCARGAR MP4</button>
+    </div>
+    <div class="stlbl" id="st-${id}" style="color:var(--muted)">● EN ESPERA</div>
+
+    <!-- STATS -->
+    <div class="stats-row" id="stats-${id}" style="display:none">
+      <div class="stat"><div class="stat-val" id="sv-mb-${id}">0 MB</div><div class="stat-lbl">Capturado</div></div>
+      <div class="stat"><div class="stat-val" id="sv-ch-${id}">0</div><div class="stat-lbl">Segmentos</div></div>
+      <div class="stat"><div class="stat-val" id="sv-tm-${id}">00:00</div><div class="stat-lbl">Tiempo</div></div>
+    </div>
+
+    <!-- PROGRESS -->
+    <div class="prog-wrap" id="pw-${id}">
+      <div class="prog-bar"><div class="prog-fill" id="pf-${id}"></div></div>
+      <div class="prog-label"><span id="pl-${id}">Procesando…</span><span id="pp-${id}">0%</span></div>
+    </div>
+
+    <!-- WARNING -->
+    <div class="warn-banner">
+      ⚠️ <strong>Nota:</strong> Este grabador necesita la <strong>URL directa del stream M3U8</strong> de TikTok.
+      Usa las cookies para obtenerla via yt-dlp localmente con <code>--get-url</code> y pégala abajo, o usa la versión con servidor Flask para resolución automática.
+    </div>
+
+    <!-- URL STREAM (campo extra) -->
+    <div class="slabel" style="margin-top:10px">④ URL directa del stream (M3U8/FLV) <span style="color:var(--warn);font-size:.6rem">— obtenida con yt-dlp --get-url</span></div>
+    <div class="fw"><div class="fi">
+      <input class="inp" id="surl-${id}" type="text" placeholder="https://pull-hls-f19.tiktokcdn.com/…/index.m3u8">
+    </div></div>
+    <div class="hint">Si tienes la URL directa, la grabación funciona 100% en el navegador sin nada más.</div>
+
+    <!-- CONSOLA -->
+    <div class="slabel" style="margin-top:10px">Consola</div>
+    <div class="console" id="con-${id}"></div>
+  `;
+  document.getElementById("panels").appendChild(p);
+
+  // Cookie placeholder
+  const ta = document.getElementById(`ta-${id}`);
+  ta.style.color = "var(--muted)";
+  ta.addEventListener("focus", () => {
+    if (ta.value === COOKIE_PH) { ta.value = ""; ta.style.color = "var(--text)"; }
+  });
+  ta.addEventListener("blur", () => {
+    if (!ta.value.trim()) {
+      ta.value = COOKIE_PH; ta.style.color = "var(--muted)";
+      document.getElementById(`cst-${id}`).textContent = "";
+    } else {
+      const n = ta.value.split("\n").filter(l=>l.trim()&&!l.startsWith("#")).length;
+      document.getElementById(`cst-${id}`).textContent = `✅ ${n} entradas de cookie detectadas`;
+      document.getElementById(`cst-${id}`).style.color = "var(--success)";
+      saveState(id);
+    }
+  });
+
+  loadSaved(id);
+  log(id, "Listo. Introduce la URL del stream M3U8 y pulsa INICIAR.", "lm");
+  selectTab(id);
+}
+
+function selectTab(id) {
+  activeTab = id;
+  document.querySelectorAll(".tab").forEach(t=>t.classList.remove("active"));
+  document.querySelectorAll(".panel").forEach(p=>p.classList.remove("active"));
+  document.getElementById(`tab-${id}`)?.classList.add("active");
+  document.getElementById(`panel-${id}`)?.classList.add("active");
+}
+
+function closeTab(e, id) {
+  e.stopPropagation();
+  if (tabs[id]?.recording) {
+    if (!confirm("Está grabando. ¿Detener y cerrar?")) return;
+    detener(id);
+  }
+  delete tabs[id];
+  document.getElementById(`tab-${id}`)?.remove();
+  document.getElementById(`panel-${id}`)?.remove();
+  const rem = Object.keys(tabs);
+  if (rem.length) selectTab(parseInt(rem[rem.length-1]));
+}
+
+// ══════════════════════════════════════════
+//  PREVIEWS / STATE
+// ══════════════════════════════════════════
+function updatePreviews(id) {
+  const u = document.getElementById(`usr-${id}`).value.replace(/^@/,"").trim();
+  const n = document.getElementById(`nom-${id}`).value.trim();
+  document.getElementById(`upr-${id}`).textContent = u
+    ? `https://www.tiktok.com/@${u}/live` : "https://www.tiktok.com/@… /live";
+  document.getElementById(`rpr-${id}`).textContent = n ? `📁 ${n}.mp4` : "";
+  document.getElementById(`tlbl-${id}`).textContent = n ? `◉ ${n}` : `Tab ${id+1}`;
+  saveState(id);
+}
+
+function saveState(id) {
+  try {
+    const s = JSON.parse(localStorage.getItem("ttk_state")||"{}");
+    s[id] = {
+      cookies: document.getElementById(`ta-${id}`)?.value,
+      usuario: document.getElementById(`usr-${id}`)?.value,
+      nombre:  document.getElementById(`nom-${id}`)?.value,
+      surl:    document.getElementById(`surl-${id}`)?.value,
+    };
+    localStorage.setItem("ttk_state", JSON.stringify(s));
+  } catch {}
+}
+
+function loadSaved(id) {
+  try {
+    const s = JSON.parse(localStorage.getItem("ttk_state")||"{}")[id];
+    if (!s) return;
+    if (s.cookies && s.cookies !== COOKIE_PH) {
+      const ta = document.getElementById(`ta-${id}`);
+      ta.value = s.cookies; ta.style.color = "var(--text)";
+      const n = s.cookies.split("\n").filter(l=>l.trim()&&!l.startsWith("#")).length;
+      document.getElementById(`cst-${id}`).textContent = `✅ ${n} entradas recuperadas`;
+    }
+    if (s.usuario) document.getElementById(`usr-${id}`).value = s.usuario;
+    if (s.nombre)  document.getElementById(`nom-${id}`).value = s.nombre;
+    if (s.surl)    document.getElementById(`surl-${id}`).value = s.surl;
+    updatePreviews(id);
+  } catch {}
+}
+
+function clearCookies(id) {
+  const ta = document.getElementById(`ta-${id}`);
+  ta.value = COOKIE_PH; ta.style.color = "var(--muted)";
+  document.getElementById(`cst-${id}`).textContent = "";
+  log(id, "Cookies limpiadas.", "lw");
+}
+
+// ══════════════════════════════════════════
+//  CONSOLA / UI
+// ══════════════════════════════════════════
+function log(id, msg, cls="li") {
+  const c = document.getElementById(`con-${id}`);
+  if (!c) return;
+  const ts = new Date().toLocaleTimeString("es",{hour12:false});
+  const sp = document.createElement("span");
+  sp.className = `ll ${cls}`;
+  sp.innerHTML = `<span class="lts">[${ts}]</span>${esc(msg)}`;
+  c.appendChild(sp);
+  c.appendChild(document.createTextNode("\n"));
+  c.scrollTop = c.scrollHeight;
+}
+
+function esc(s){ return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;") }
+
+function setStatus(id, txt, color) {
+  const el = document.getElementById(`st-${id}`);
+  if (el) { el.textContent = txt; el.style.color = color; }
+}
+
+function setDot(id, cls) {
+  const d = document.getElementById(`tdot-${id}`);
+  if (d) d.className = `tdot ${cls}`;
+}
+
+function updateStats(id) {
+  const t = tabs[id];
+  if (!t) return;
+  const mb = (t.chunks.reduce((a,c)=>a+c.byteLength,0)/1048576).toFixed(1);
+  document.getElementById(`sv-mb-${id}`).textContent = `${mb} MB`;
+  document.getElementById(`sv-ch-${id}`).textContent = t.chunks.length;
+  if (!t.startTime) return;
+  const sec = Math.floor((Date.now()-t.startTime)/1000);
+  const mm = String(Math.floor(sec/60)).padStart(2,"0");
+  const ss = String(sec%60).padStart(2,"0");
+  document.getElementById(`sv-tm-${id}`).textContent = `${mm}:${ss}`;
+}
+
+function updateProgress(id, pct, label) {
+  document.getElementById(`pf-${id}`).style.width = pct+"%";
+  document.getElementById(`pp-${id}`).textContent = pct+"%";
+  if (label) document.getElementById(`pl-${id}`).textContent = label;
+  document.getElementById(`gpf`).style.width = pct+"%";
+}
+
+// ══════════════════════════════════════════
+//  PROXY FETCH — intenta proxies en orden
+// ══════════════════════════════════════════
+async function proxyFetch(url, opts={}) {
+  for (const mkProxy of CORS_PROXIES) {
+    try {
+      const r = await fetch(mkProxy(url), {...opts, signal: AbortSignal.timeout(8000)});
+      if (r.ok) return r;
+    } catch {}
+  }
+  throw new Error("Todos los proxies CORS fallaron. TikTok puede haber bloqueado la URL.");
+}
+
+// ══════════════════════════════════════════
+//  GRABAR — HLS M3U8 chunk-by-chunk
+// ══════════════════════════════════════════
+async function iniciar(id) {
+  const streamUrl = document.getElementById(`surl-${id}`).value.trim();
+  const nombre    = document.getElementById(`nom-${id}`).value.trim().replace(/\.mp4$/i,"") || "grabacion";
+
+  if (!streamUrl) {
+    alert("Introduce la URL directa del stream M3U8.\n\nObtenerla con:\nyt-dlp --get-url https://www.tiktok.com/@USUARIO/live");
+    return;
+  }
+
+  const t = tabs[id];
+  t.chunks = [];
+  t.recording = true;
+  t.startTime = Date.now();
+  t.nombre = nombre;
+  t.abortCtrl = new AbortController();
+
+  document.getElementById(`bi-${id}`).disabled = true;
+  document.getElementById(`bd-${id}`).disabled = false;
+  document.getElementById(`dl-${id}`).style.display = "none";
+  document.getElementById(`stats-${id}`).style.display = "flex";
+  document.getElementById(`pw-${id}`).style.display = "none";
+  setStatus(id, "🔴 GRABANDO", "var(--red)");
+  setDot(id, "rec");
+
+  log(id, "─".repeat(44), "lm");
+  log(id, "Iniciando grabación del stream…", "li");
+  log(id, `Stream: ${streamUrl}`, "lc");
+  log(id, "─".repeat(44), "lm");
+
+  // Detectar si es M3U8 o stream directo
+  if (streamUrl.includes(".m3u8")) {
+    await grabarHLS(id, streamUrl);
+  } else {
+    await grabarDirecto(id, streamUrl);
+  }
+}
+
+// ─── HLS: parsear m3u8 y descargar segmentos ───
+async function grabarHLS(id, m3u8url) {
+  const t = tabs[id];
+  const seenSegs = new Set();
+  let statsInterval = setInterval(() => updateStats(id), 1000);
+
+  log(id, "Modo HLS — descargando segmentos…", "lc");
+
+  try {
+    while (t.recording) {
+      let playlist;
+      try {
+        const r = await proxyFetch(m3u8url, {signal: t.abortCtrl.signal});
+        playlist = await r.text();
+      } catch(ex) {
+        if (!t.recording) break;
+        log(id, `Error fetching playlist: ${ex.message}`, "le");
+        await sleep(2000);
+        continue;
+      }
+
+      const lines = playlist.split("\n").map(l=>l.trim()).filter(Boolean);
+      const baseUrl = m3u8url.substring(0, m3u8url.lastIndexOf("/")+1);
+
+      // Detectar sub-playlist (master m3u8)
+      const subPl = lines.find(l=>l.endsWith(".m3u8")&&!l.startsWith("#"));
+      if (subPl) {
+        const sub = subPl.startsWith("http") ? subPl : baseUrl+subPl;
+        log(id, "Master playlist detectada, usando stream…", "lc");
+        m3u8url = sub;
+        continue;
+      }
+
+      const segs = lines.filter(l=>!l.startsWith("#")&&(l.endsWith(".ts")||l.endsWith(".aac")||l.includes(".ts?")||l.includes("segment")));
+
+      for (const seg of segs) {
+        if (!t.recording) break;
+        if (seenSegs.has(seg)) continue;
+        seenSegs.add(seg);
+        const segUrl = seg.startsWith("http") ? seg : baseUrl+seg;
+        try {
+          const r = await proxyFetch(segUrl, {signal: t.abortCtrl.signal});
+          const buf = await r.arrayBuffer();
+          t.chunks.push(new Uint8Array(buf));
+          log(id, `Segmento #${seenSegs.size} — ${(buf.byteLength/1024).toFixed(0)} KB`, "li");
+        } catch(ex) {
+          if (!t.recording) break;
+          log(id, `Error segmento: ${ex.message}`, "lw");
+        }
+      }
+
+      // Stream en vivo — esperar antes del siguiente ciclo
+      const isLive = playlist.includes("#EXT-X-ENDLIST") === false;
+      if (!isLive || !t.recording) break;
+      await sleep(3000);
+    }
+  } finally {
+    clearInterval(statsInterval);
+    if (t.chunks.length > 0) {
+      await procesarYDescargar(id);
+    } else {
+      log(id, "⚠️ No se capturaron segmentos.", "lw");
+      resetUI(id);
+    }
+  }
+}
+
+// ─── Stream directo (FLV/MP4 raw) ───
+async function grabarDirecto(id, url) {
+  const t = tabs[id];
+  log(id, "Modo stream directo — leyendo datos…", "lc");
+  let statsInterval = setInterval(() => updateStats(id), 1000);
+
+  try {
+    const r = await proxyFetch(url, {signal: t.abortCtrl.signal});
+    const reader = r.body.getReader();
+    while (t.recording) {
+      const {done, value} = await reader.read();
+      if (done) break;
+      t.chunks.push(value);
+      if (t.chunks.length % 50 === 0) {
+        const mb = (t.chunks.reduce((a,c)=>a+c.byteLength,0)/1048576).toFixed(1);
+        log(id, `Capturado: ${mb} MB`, "li");
+      }
+    }
+  } catch(ex) {
+    if (t.recording) log(id, `Stream interrumpido: ${ex.message}`, "lw");
+  } finally {
+    clearInterval(statsInterval);
+    if (t.chunks.length > 0) {
+      await procesarYDescargar(id);
+    } else {
+      log(id, "⚠️ No se capturaron datos.", "lw");
+      resetUI(id);
+    }
+  }
+}
+
+// ─── FFmpeg: ensamblar y convertir a MP4 ───
+async function procesarYDescargar(id) {
+  const t = tabs[id];
+  const totalMB = (t.chunks.reduce((a,c)=>a+c.byteLength,0)/1048576).toFixed(1);
+  log(id, `─`.repeat(44), "lm");
+  log(id, `✅ Grabación finalizada. ${totalMB} MB capturados.`, "ls");
+  log(id, "Cargando FFmpeg.wasm para procesar…", "lc");
+
+  document.getElementById(`pw-${id}`).style.display = "block";
+  updateProgress(id, 0, "Cargando FFmpeg…");
+  setStatus(id, "⚙️ PROCESANDO", "var(--warn)");
+
+  try {
+    if (!t.ff) await loadFFmpeg(id);
+    const { fetchFile } = FFmpegUtil;
+    const ff = t.ff;
+
+    // Combinar chunks en un solo buffer
+    const total = t.chunks.reduce((a,c)=>a+c.byteLength,0);
+    const combined = new Uint8Array(total);
+    let offset = 0;
+    for (const chunk of t.chunks) { combined.set(chunk, offset); offset += chunk.byteLength; }
+
+    log(id, "Escribiendo datos en FFmpeg…", "lm");
+    await ff.writeFile("input.ts", combined);
+
+    updateProgress(id, 20, "Convirtiendo a MP4…");
+    log(id, "Convirtiendo a MP4 (remux rápido)…", "lc");
+
+    await ff.exec(["-i","input.ts","-c","copy","-movflags","+faststart","output.mp4"]);
+
+    updateProgress(id, 90, "Preparando descarga…");
+    const data = await ff.readFile("output.mp4");
+    const blob = new Blob([data.buffer], {type:"video/mp4"});
+    t.blobUrl = URL.createObjectURL(blob);
+    t.nombre = t.nombre || "grabacion";
+
+    updateProgress(id, 100, "¡Listo!");
+    log(id, `✅ MP4 listo — ${(blob.size/1048576).toFixed(1)} MB`, "ls");
+    log(id, "⬇️ Descarga automática iniciada…", "ls");
+
+    // Auto-descarga
+    const a = document.createElement("a");
+    a.href = t.blobUrl;
+    a.download = `${t.nombre}.mp4`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+
+    document.getElementById(`dl-${id}`).style.display = "flex";
+    setStatus(id, "✅ DESCARGADO", "var(--success)");
+    setDot(id, "ok");
+
+  } catch(ex) {
+    log(id, `❌ Error FFmpeg: ${ex.message}`, "le");
+    log(id, "Descargando datos raw como fallback…", "lw");
+    // Fallback: descargar raw
+    const total = t.chunks.reduce((a,c)=>a+c.byteLength,0);
+    const combined = new Uint8Array(total);
+    let offset = 0;
+    for (const ch of t.chunks) { combined.set(ch, offset); offset += ch.byteLength; }
+    const blob = new Blob([combined], {type:"video/mp4"});
+    t.blobUrl = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = t.blobUrl; a.download = `${t.nombre}.ts`;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    document.getElementById(`dl-${id}`).style.display = "flex";
+    setStatus(id, "⚠️ DESCARGADO (raw)", "var(--warn)");
+  } finally {
+    resetUI(id);
+  }
+}
+
+function detener(id) {
+  const t = tabs[id];
+  if (!t) return;
+  t.recording = false;
+  t.abortCtrl?.abort();
+  log(id, "⏹ Grabación detenida por el usuario.", "lw");
+}
+
+function descargar(id) {
+  const t = tabs[id];
+  if (!t?.blobUrl) return;
+  const a = document.createElement("a");
+  a.href = t.blobUrl; a.download = `${t.nombre||"grabacion"}.mp4`;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+}
+
+function resetUI(id) {
+  const t = tabs[id];
+  if (t) t.recording = false;
+  document.getElementById(`bi-${id}`).disabled = false;
+  document.getElementById(`bd-${id}`).disabled = true;
+}
+
+function sleep(ms){ return new Promise(r=>setTimeout(r,ms)) }
+
+// ══════════════════════════════════════════
+addTab();
+</script>
+</body>
+</html>
